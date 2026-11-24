@@ -80,6 +80,30 @@ def avisar(titulo, mensaje, prioridad="default"):
     urllib.request.urlopen(req, timeout=30).read()
 
 
+def diagnostico(page):
+    """Imprime datos de la pagina de LOGIN para depurar (nunca texto de paginas con sesion)."""
+    try:
+        info = page.evaluate(
+            """() => {
+              const hayClave = !!document.querySelector('input[type=password]');
+              return {
+                titulo: document.title,
+                url: location.href,
+                inputs: [...document.querySelectorAll('input')].map(i => ({
+                  tipo: i.type, id: i.id, name: i.name,
+                  placeholder: i.placeholder,
+                  visible: !!(i.offsetWidth || i.offsetHeight)})),
+                texto: hayClave
+                  ? document.body.innerText.replace(/\\s+/g, ' ').slice(0, 300)
+                  : '(omitido: ya no es la pagina de login)',
+              };
+            }"""
+        )
+        print("DIAGNOSTICO:", json.dumps(info, ensure_ascii=False)[:1800])
+    except Exception:
+        print("DIAGNOSTICO: no se pudo leer la pagina")
+
+
 def leer_notas():
     """Inicia sesion en el SIGA y devuelve {'cabeceras': [...], 'filas': [[...]]}."""
     from playwright.sync_api import sync_playwright
@@ -103,14 +127,23 @@ def leer_notas():
         if not abierto:
             raise RuntimeError("No se pudo abrir la pagina de login (sitio caido?)")
 
-        page.get_by_placeholder(re.compile("CODIGO", re.I)).fill(codigo)
-        page.get_by_placeholder(re.compile("DNI", re.I)).fill(dni)
-        page.get_by_placeholder(re.compile("CONTRASE", re.I)).fill(clave)
-        page.get_by_text(re.compile("VALIDAR ACCESO", re.I)).first.click()
         try:
+            page.wait_for_selector("input:visible", timeout=30000)
+            # Los dos primeros campos de texto son codigo y DNI; el de clave es type=password.
+            campos = page.locator(
+                "input:visible:not([type=password]):not([type=hidden])"
+                ":not([type=button]):not([type=submit]):not([type=checkbox])"
+            )
+            if campos.count() < 2:
+                raise RuntimeError("No encontre los campos de codigo y DNI")
+            campos.nth(0).fill(codigo, timeout=15000)
+            campos.nth(1).fill(dni, timeout=15000)
+            page.locator("input[type=password]:visible").first.fill(clave, timeout=15000)
+            page.get_by_text(re.compile("VALIDAR ACCESO", re.I)).first.click(timeout=15000)
             page.wait_for_url(re.compile("bienvenido"), timeout=45000)
-        except Exception:
-            raise RuntimeError("El login no avanzo (datos incorrectos o cambio la pagina)")
+        except Exception as e:
+            diagnostico(page)
+            raise RuntimeError(f"Fallo el login ({type(e).__name__})") from None
 
         base = page.url.split("/WebAlumno/")[0]
         try:

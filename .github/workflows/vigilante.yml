@@ -1,0 +1,44 @@
+name: Vigilante de notas
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # cada 15 minutos
+  workflow_dispatch:          # permite ejecutarlo a mano desde la pestaña Actions
+
+concurrency:
+  group: vigilante
+  cancel-in-progress: false
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # La "memoria" de las notas se guarda en la cache de GitHub,
+      # no en el repositorio, para no publicar tus calificaciones.
+      - name: Restaurar memoria de notas
+        uses: actions/cache@v4
+        with:
+          path: estado.json
+          key: estado-${{ github.run_id }}
+          restore-keys: |
+            estado-
+
+      - name: Instalar navegador
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Revisar notas
+        env:
+          UNS_CODIGO: ${{ secrets.UNS_CODIGO }}
+          UNS_DNI: ${{ secrets.UNS_DNI }}
+          UNS_PASS: ${{ secrets.UNS_PASS }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python vigilante.py

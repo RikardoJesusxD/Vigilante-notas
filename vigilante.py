@@ -93,7 +93,7 @@ def diagnostico(page):
                   tipo: i.type, id: i.id, name: i.name,
                   placeholder: i.placeholder,
                   visible: !!(i.offsetWidth || i.offsetHeight)})),
-                texto: hayClave
+                texto: (hayClave || location.pathname.includes('login.xhtml'))
                   ? document.body.innerText.replace(/\\s+/g, ' ').slice(0, 300)
                   : '(omitido: ya no es la pagina de login)',
               };
@@ -112,20 +112,33 @@ def leer_notas():
 
     with sync_playwright() as p:
         navegador = p.chromium.launch(headless=True)
-        ctx = navegador.new_context(locale="es-PE", viewport={"width": 1400, "height": 900})
+        ctx = navegador.new_context(
+            locale="es-PE",
+            timezone_id="America/Lima",
+            viewport={"width": 1400, "height": 900},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+        )
         ctx.set_default_timeout(45000)
         page = ctx.new_page()
 
         abierto = False
         for url in URLS_LOGIN:
             try:
-                page.goto(url, wait_until="domcontentloaded")
-                abierto = True
-                break
-            except Exception:
-                continue
+                resp = page.goto(url, wait_until="domcontentloaded")
+                codigo_http = resp.status if resp else "?"
+                print(f"Abri {url} -> HTTP {codigo_http}")
+                if resp and resp.status < 400:
+                    abierto = True
+                    break
+            except Exception as e:
+                motivo = (str(e).splitlines() or [""])[0][:150]
+                print(f"No pude abrir {url}: {motivo}")
         if not abierto:
-            raise RuntimeError("No se pudo abrir la pagina de login (sitio caido?)")
+            diagnostico(page)
+            raise RuntimeError("No se pudo abrir la pagina de login (bloqueo o sitio caido?)")
 
         try:
             page.wait_for_selector("input:visible", timeout=30000)
